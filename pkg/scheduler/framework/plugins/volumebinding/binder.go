@@ -225,6 +225,7 @@ type volumeBinder struct {
 
 	csiDriverLister          storagelisters.CSIDriverLister
 	csiStorageCapacityLister storagelisters.CSIStorageCapacityLister
+	capacitySelectors        capacitySelectorCache
 }
 
 var _ SchedulerVolumeBinder = &volumeBinder{}
@@ -273,6 +274,9 @@ func NewVolumeBinder(
 
 	b.csiDriverLister = capacityCheck.CSIDriverInformer.Lister()
 	b.csiStorageCapacityLister = capacityCheck.CSIStorageCapacityInformer.Lister()
+	if _, err := capacityCheck.CSIStorageCapacityInformer.Informer().AddEventHandler(b.capacitySelectors.eventHandler()); err != nil {
+		return nil, err
+	}
 
 	return b, nil
 }
@@ -1039,12 +1043,8 @@ func (b *volumeBinder) nodeHasAccess(logger klog.Logger, node *v1.Node, capacity
 		return false
 	}
 	// Only matching by label is supported.
-	selector, err := metav1.LabelSelectorAsSelector(capacity.NodeTopology)
-	if err != nil {
-		logger.Error(err, "Unexpected error converting to a label selector", "nodeTopology", capacity.NodeTopology)
-		return false
-	}
-	return selector.Matches(labels.Set(node.Labels))
+	selector := b.capacitySelectors.get(logger, capacity)
+	return selector != nil && selector.Matches(labels.Set(node.Labels))
 }
 
 type byPVCSize []*v1.PersistentVolumeClaim
